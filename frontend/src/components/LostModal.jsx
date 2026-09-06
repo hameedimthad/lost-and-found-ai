@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { X, Upload, Camera, Trash2, User, PawPrint, Phone, MapPin, Sparkles, AlertTriangle } from 'lucide-react'
 import CameraCaptureModal from './CameraCaptureModal'
+import { compressImages } from '../utils/imageCompressor'
 
 export default function LostModal({ isOpen, onClose, onSuccess }) {
   if (!isOpen) return null
@@ -63,6 +64,9 @@ export default function LostModal({ isOpen, onClose, onSuccess }) {
     setLoading(true)
 
     try {
+      // Compress uploaded pictures client-side before sending
+      const optimizedFiles = await compressImages(selectedFiles, 1280, 0.85)
+
       const formData = new FormData()
       formData.append('report_type', 'lost')
       formData.append('category', category)
@@ -74,7 +78,7 @@ export default function LostModal({ isOpen, onClose, onSuccess }) {
       formData.append('location', location)
       formData.append('details', details)
 
-      selectedFiles.forEach(file => {
+      optimizedFiles.forEach(file => {
         formData.append('files', file)
       })
 

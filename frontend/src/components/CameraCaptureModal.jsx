@@ -124,18 +124,33 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
     if (!videoRef.current) return
 
     const video = videoRef.current
+    let w = video.videoWidth || 640
+    let h = video.videoHeight || 480
+
+    // Downscale if higher than 1280 to ensure lightning-fast upload
+    const maxDim = 1280
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w)
+        w = maxDim
+      } else {
+        w = Math.round((w * maxDim) / h)
+        h = maxDim
+      }
+    }
+
     const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth || 640
-    canvas.height = video.videoHeight || 480
+    canvas.width = w
+    canvas.height = h
 
     const ctx = canvas.getContext('2d')
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    ctx.drawImage(video, 0, 0, w, h)
 
     canvas.toBlob((blob) => {
       if (!blob) return
       setCapturedBlob(blob)
       setCapturedUrl(URL.createObjectURL(blob))
-    }, 'image/jpeg', 0.92)
+    }, 'image/jpeg', 0.85)
   }
 
   const handleRetake = () => {

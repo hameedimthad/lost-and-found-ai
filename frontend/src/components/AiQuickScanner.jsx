@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { Camera, Upload, Sparkles, AlertCircle, Phone, ArrowRight, User, PawPrint, Search, RefreshCw } from 'lucide-react'
 import CameraCaptureModal from './CameraCaptureModal'
+import { compressImage } from '../utils/imageCompressor'
 
 export default function AiQuickScanner({ onMatchSelected }) {
   const [selectedImage, setSelectedImage] = useState(null)
@@ -38,8 +39,11 @@ export default function AiQuickScanner({ onMatchSelected }) {
     setHasScanned(false)
 
     try {
+      // Fast client-side compression before sending over network
+      const optimizedFile = await compressImage(selectedImage, 1280, 0.85)
+
       const formData = new FormData()
-      formData.append('file', selectedImage)
+      formData.append('file', optimizedFile)
       formData.append('category', category)
       formData.append('target_type', 'lost')
       formData.append('threshold', threshold)

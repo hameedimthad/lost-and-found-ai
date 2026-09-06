@@ -18,6 +18,7 @@ from .database import (
     get_db_connection
 )
 from .ai_engine import (
+    get_models,
     extract_advanced_features,
     find_matches_for_embeddings,
     compare_two_feature_sets,
@@ -31,6 +32,15 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 init_db()
 
 app = FastAPI(title="Lost & Found AI Portal API", version="2.0.0")
+
+@app.on_event("startup")
+def preload_ai_models():
+    """Pre-loads FaceNet, MTCNN and MobileNet into memory at server start to eliminate first-request delay."""
+    try:
+        get_models()
+        print("⚡ AI Biometric models preloaded and ready in memory.")
+    except Exception as e:
+        print(f"Warning: Model preload failed: {e}")
 
 app.add_middleware(
     CORSMiddleware,
