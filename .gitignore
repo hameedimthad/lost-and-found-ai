@@ -1,0 +1,30 @@
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Node dependencies & build artifacts
+node_modules/
+frontend/node_modules/
+.npm
+dist/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.cache/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# SQLite Database
+*.db
+backend/*.db
+data/

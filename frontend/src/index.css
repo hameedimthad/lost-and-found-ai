@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased selection:bg-rose-500 selection:text-white;
+  }
+}
+
+/* Custom smooth pulse animation for AI scanning */
+@keyframes aiScan {
+  0% { transform: translateY(0%); opacity: 0.8; }
+  50% { transform: translateY(100%); opacity: 0.3; }
+  100% { transform: translateY(0%); opacity: 0.8; }
+}
+
+.ai-scan-line {
+  animation: aiScan 2.5s ease-in-out infinite;
+}

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  lost-and-found-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lost_and_found_ai
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist SQLite database and uploaded photos
+      - ./data/uploads:/app/backend/uploads
+      - ./data/db:/app/backend/data
+    environment:
+      - PORT=8000
