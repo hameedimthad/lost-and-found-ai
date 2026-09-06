@@ -1,86 +1,125 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { X, Camera, RefreshCw, Check, AlertCircle, Sparkles } from 'lucide-react'
+import { X, Camera, RefreshCw, Check, AlertCircle, Upload, Settings } from 'lucide-react'
 
 export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
   if (!isOpen) return null
 
   const videoRef = useRef(null)
-  const [stream, setStream] = useState(null)
+  const fileFallbackRef = useRef(null)
+  const streamRef = useRef(null)
+
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [capturedUrl, setCapturedUrl] = useState(null)
-  const [facingMode, setFacingMode] = useState('environment') // 'user' or 'environment'
-  const [error, setError] = useState('')
+  const [errorDetails, setErrorDetails] = useState(null)
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false)
+  const [currentFacingMode, setCurrentFacingMode] = useState(() => {
+    // Detect mobile vs laptop/desktop: laptops only have front cameras ('user')
+    const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    return isMobile ? 'environment' : 'user'
+  })
 
-  // Start Camera Stream
+  // Cleanup helper
+  const stopCurrentStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+  }
+
   const startCamera = async (mode) => {
-    setError('')
-    // Stop any existing stream
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop())
+    setErrorDetails(null)
+    stopCurrentStream()
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setErrorDetails({
+        type: 'Unsupported',
+        message: 'Camera access is not supported by your browser or connection. Note: HTTPS is required.',
+      })
+      return
     }
 
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera access is not supported on this browser or device.')
+      // Check available video devices
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoInputs = devices.filter(d => d.kind === 'videoinput')
+        if (videoInputs.length > 1) {
+          setHasMultipleCameras(true)
+        }
+      } catch (e) {
+        // Enumerate devices may fail before permission; ignore
       }
 
-      // Check available devices
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter(d => d.kind === 'videoinput')
-      if (videoDevices.length > 1) {
-        setHasMultipleCameras(true)
+      // 1. Try with ideal facingMode constraint (tolerant on laptops without rear cameras)
+      let stream = null
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: mode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        })
+      } catch (firstErr) {
+        console.warn('First camera attempt with ideal facingMode failed, trying generic video constraint:', firstErr)
+        // 2. Fallback to generic unconstrained video
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       }
 
-      const constraints = {
-        video: {
-          facingMode: mode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      }
+      streamRef.current = stream
 
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints)
-      setStream(newStream)
       if (videoRef.current) {
-        videoRef.current.srcObject = newStream
+        videoRef.current.srcObject = stream
+        try {
+          await videoRef.current.play()
+        } catch (playErr) {
+          console.warn('Auto play video warning:', playErr)
+        }
       }
     } catch (err) {
-      console.error('Camera access error:', err)
-      // Fallback try without specific facingMode if first attempt failed
-      try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        setStream(fallbackStream)
-        if (videoRef.current) {
-          videoRef.current.srcObject = fallbackStream
-        }
-      } catch (fallbackErr) {
-        setError(
-          err.name === 'NotAllowedError'
-            ? 'Camera permission denied. Please allow camera access in your browser settings.'
-            : 'Could not access camera. Please check your camera permissions or device settings.'
-        )
+      console.error('Final camera access error:', err)
+      
+      let title = 'Camera Access Issue'
+      let message = err.message || 'Could not access the camera.'
+      let isMacPermission = false
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        title = 'Camera Permission Blocked'
+        message = 'Camera permission was denied. On Mac, check BOTH your browser URL bar AND "System Settings ➔ Privacy & Security ➔ Camera ➔ Allow your browser".'
+        isMacPermission = true
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        title = 'Camera in Use or Locked'
+        message = 'Your webcam is currently in use by another app (such as FaceTime, Zoom, WeChat, or Teams) or macOS privacy blocked the feed. Please close other apps using the camera.'
+      } else if (err.name === 'OverconstrainedError') {
+        title = 'Camera Mode Unsupported'
+        message = 'The requested camera mode is not supported by your hardware.'
       }
+
+      setErrorDetails({
+        type: err.name,
+        title,
+        message,
+        isMacPermission,
+      })
     }
   }
 
   useEffect(() => {
-    startCamera(facingMode)
+    startCamera(currentFacingMode)
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop())
+      stopCurrentStream()
+      if (capturedUrl) {
+        URL.revokeObjectURL(capturedUrl)
       }
     }
-  }, [facingMode])
+  }, [currentFacingMode])
 
   const toggleCamera = () => {
-    const nextMode = facingMode === 'environment' ? 'user' : 'environment'
-    setFacingMode(nextMode)
+    setCurrentFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'))
   }
 
-  // Snap / Shoot photo
   const handleShoot = () => {
     if (!videoRef.current) return
 
@@ -105,16 +144,16 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
     }
     setCapturedBlob(null)
     setCapturedUrl(null)
-    // Resume video
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream
+
+    if (videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
+      videoRef.current.play().catch(() => {})
     }
   }
 
   const handleConfirm = () => {
     if (!capturedBlob) return
 
-    // Convert blob to File object
     const file = new File(
       [capturedBlob],
       `camera_shot_${Date.now()}.jpg`,
@@ -125,16 +164,21 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
     handleClose()
   }
 
+  const handleFallbackFile = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    onCapture(file)
+    handleClose()
+  }
+
   const handleClose = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop())
-    }
+    stopCurrentStream()
     if (capturedUrl) {
       URL.revokeObjectURL(capturedUrl)
     }
-    setStream(null)
     setCapturedBlob(null)
     setCapturedUrl(null)
+    setErrorDetails(null)
     onClose()
   }
 
@@ -155,12 +199,12 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {hasMultipleCameras && !capturedUrl && (
+            {hasMultipleCameras && !capturedUrl && !errorDetails && (
               <button
                 type="button"
                 onClick={toggleCamera}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-                title="Switch Camera (Front/Back)"
+                title="Switch Camera"
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
@@ -179,20 +223,46 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
         {/* Viewfinder Viewport */}
         <div className="relative bg-black w-full aspect-4/3 flex items-center justify-center overflow-hidden">
           
-          {error ? (
-            <div className="p-6 text-center max-w-sm">
-              <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-2" />
-              <p className="text-white font-bold text-sm">{error}</p>
-              <p className="text-xs text-slate-400 mt-1">
-                Please grant camera permission in your browser URL bar or use file upload.
+          {errorDetails ? (
+            /* Error & Mac Guidance Screen */
+            <div className="p-6 text-center max-w-md mx-auto space-y-3">
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-1">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h4 className="text-white font-black text-base">{errorDetails.title}</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                {errorDetails.message}
               </p>
-              <button
-                type="button"
-                onClick={() => startCamera(facingMode)}
-                className="mt-4 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold"
-              >
-                Try Again
-              </button>
+
+              {errorDetails.isMacPermission && (
+                <div className="p-3 bg-slate-800/80 rounded-xl border border-slate-700 text-[11px] text-slate-300 text-left space-y-1">
+                  <span className="font-bold text-white block">🍎 On Mac (macOS):</span>
+                  <span>1. Open <strong>System Settings</strong> ➔ <strong>Privacy & Security</strong></span>
+                  <br />
+                  <span>2. Click <strong>Camera</strong></span>
+                  <br />
+                  <span>3. Turn ON toggle for your browser (e.g. <strong>Google Chrome</strong>)</span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => startCamera(currentFacingMode)}
+                  className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Try Again
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileFallbackRef.current?.click()}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Choose Photo File Instead</span>
+                </button>
+              </div>
             </div>
           ) : capturedUrl ? (
             /* Review captured picture */
@@ -230,6 +300,15 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
             </>
           )}
 
+          {/* Hidden Fallback Input */}
+          <input
+            ref={fileFallbackRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFallbackFile}
+            className="hidden"
+          />
+
         </div>
 
         {/* Shutter / Confirmation Controls */}
@@ -239,14 +318,14 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
               <button
                 type="button"
                 onClick={handleRetake}
-                className="flex-1 max-w-xs py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition-colors"
+                className="flex-1 max-w-xs py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition-colors cursor-pointer"
               >
                 Retake
               </button>
               <button
                 type="button"
                 onClick={handleConfirm}
-                className="flex-1 max-w-xs py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 max-w-xs py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 <Check className="w-4 h-4" />
                 <span>Use This Photo</span>
@@ -255,9 +334,9 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture }) {
           ) : (
             <button
               type="button"
-              disabled={!!error}
+              disabled={!!errorDetails}
               onClick={handleShoot}
-              className="group relative flex items-center justify-center w-20 h-20 rounded-full bg-white/10 hover:bg-white/20 border-4 border-white transition-all active:scale-95 disabled:opacity-40 cursor-pointer shadow-xl"
+              className="group relative flex items-center justify-center w-20 h-20 rounded-full bg-white/10 hover:bg-white/20 border-4 border-white transition-all active:scale-95 disabled:opacity-30 cursor-pointer shadow-xl"
               title="Shoot Photo"
             >
               <div className="w-14 h-14 rounded-full bg-rose-600 group-hover:bg-rose-500 transition-colors flex items-center justify-center shadow-inner">
